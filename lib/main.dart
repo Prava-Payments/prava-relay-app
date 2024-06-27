@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-
+import 'package:readsms/readsms.dart';
+import 'dart:async';
+import 'package:permission_handler/permission_handler.dart';
 void main() {
   runApp(MaterialApp(home: Home()));
 }
@@ -12,51 +14,65 @@ class Home extends StatefulWidget {
 }
 
 class _Home extends State<Home> {
-  int counter = 1;
+    final _plugin = Readsms();
+  String sms = 'no sms received';
+  String sender = 'no sms received';
+  String time = 'no sms received';
+
+  @override
+  void initState() {
+    super.initState();
+    getPermission().then((value) {
+      if (value) {
+        _plugin.read();
+        _plugin.smsStream.listen((event) {
+          setState(() {
+            sms = event.body;
+            sender = event.sender;
+            time = event.timeReceived.toString();
+          });
+        });
+      }
+    });
+  }
+
+  Future<bool> getPermission() async {
+    if (await Permission.sms.status == PermissionStatus.granted) {
+      return true;
+    } else {
+      if (await Permission.sms.request() == PermissionStatus.granted) {
+        return true;
+      } else {
+        print("permission denied");
+        return false;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+    _plugin.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Expanded(
-                flex: 6,
-                child: Container(
-                  color: Colors.greenAccent,
-                  child: Center(
-                    child: Text("count $counter"),
-                  ),
-                )),
-            Expanded(
-                flex: 4,
-                child: Container(
-                    child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: <Widget>[
-                    Text("This is something cool"),
-                    TextButton(
-                        onPressed: () {
-                          setState(() {
-                            counter += 1;
-                          });
-                          print("the count is $counter");
-                        },
-                        child: Text("Press me 2")),
-                  ],
-                ))),
-          ],
+    return MaterialApp(
+      home: Scaffold(
+        appBar: AppBar(
+          title: const Text('Plugin example app'),
         ),
-        floatingActionButton: FloatingActionButton(
-          child: Icon(
-            Icons.sms,
-            color: Colors.white,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('new sms received: $sms'),
+              Text('new sms Sender: $sender'),
+              Text('new sms time: $time'),
+            ],
           ),
-          onPressed: () {
-            print("fetched sms");
-          },
-          backgroundColor: Colors.green,
-        ));
+        ),
+      ),
+    );
   }
 }
