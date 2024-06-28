@@ -2,22 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:readsms/readsms.dart';
 import 'dart:async';
 import 'package:permission_handler/permission_handler.dart';
+
 void main() {
   runApp(MaterialApp(home: Home()));
 }
 
 class Home extends StatefulWidget {
   @override
-  _Home createState() {
-    return _Home();
-  }
+  _Home createState() => _Home();
 }
 
 class _Home extends State<Home> {
-    final _plugin = Readsms();
-  String sms = 'no sms received';
-  String sender = 'no sms received';
-  String time = 'no sms received';
+  final _plugin = Readsms();
+  List<SmsData> smsList = [];
 
   @override
   void initState() {
@@ -27,9 +24,12 @@ class _Home extends State<Home> {
         _plugin.read();
         _plugin.smsStream.listen((event) {
           setState(() {
-            sms = event.body;
-            sender = event.sender;
-            time = event.timeReceived.toString();
+            SmsData smsData = SmsData(
+              body: event.body,
+              sender: event.sender,
+              timeReceived: event.timeReceived,
+            );
+            smsList.insert(0, smsData); // Insert new SmsData at the beginning
           });
         });
       }
@@ -60,19 +60,35 @@ class _Home extends State<Home> {
     return MaterialApp(
       home: Scaffold(
         appBar: AppBar(
-          title: const Text('Plugin example app'),
+          title: const Text('SMS Reader App'),
         ),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('new sms received: $sms'),
-              Text('new sms Sender: $sender'),
-              Text('new sms time: $time'),
-            ],
-          ),
+        body: ListView.builder(
+          itemCount: smsList.length,
+          itemBuilder: (context, index) {
+            return Card(
+              child: ListTile(
+                title: Text('Sender: ${smsList[index].sender}'),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('SMS: ${smsList[index].body}'),
+                    Text('Time: ${smsList[index].timeReceived.toString()}'),
+                  ],
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
   }
 }
+
+class SmsData {
+  final String body;
+  final String sender;
+  final DateTime timeReceived;
+
+  SmsData({required this.body, required this.sender, required this.timeReceived});
+}
+
