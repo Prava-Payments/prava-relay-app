@@ -3,7 +3,7 @@ import 'package:readsms/readsms.dart';
 import 'dart:async';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert'; 
+import 'dart:convert';  // Import for JSON encoding
 import 'package:background_sms/background_sms.dart';
 
 void main() {
@@ -36,11 +36,11 @@ class _Home extends State<Home> {
 
             // Check for specific content and send API request
             print(smsData.body);
-            if (smsData.body.contains("Sarva")) {
+            if (smsData.body.contains("Sarva, from: client, to: relay, public_address")) {
               print("-----------trying to reach server-----------------");
-              final instruction = extractEncodeMsg(smsData.body);
-              if (instruction != null) {
-                sendPostRequest(instruction, smsData.sender);
+              final address = extractPublicAddress(smsData.body);
+              if (address != null) {
+                sendPostRequest(address, smsData.sender);
               } else {
                 print("No public address found in the SMS content.");
               }
@@ -51,38 +51,32 @@ class _Home extends State<Home> {
     });
   }
 
-  String? extractEncodeMsg(String messageContent) {
-    try {
-      final base64Part =
-          messageContent.substring(messageContent.indexOf("Sarva") + 5).trim();
-      final decodedBytes = base64Decode(base64Part);
-      final decodedMessage = utf8.decode(decodedBytes);
-
-      // Extract the instruction from the decoded message
-      final instruction = decodedMessage
-          .split(", ")
-          .firstWhere((part) => part.startsWith("inst:"))
-          .split(":")[1];
-      return instruction;
-    } catch (e) {
-      print("Error decoding message: $e");
-      return null;
+  String? extractPublicAddress(String messageContent) {
+    // Regular expression to extract the public address
+    final regex = RegExp(r'public_address:\s*(0x[a-fA-F0-9]{40})');
+    final match = regex.firstMatch(messageContent);
+    if (match != null && match.groupCount > 0) {
+      return match.group(1);
     }
+    return null;
   }
 
-  Future<void> sendPostRequest(String instruction, String sender) async {
+  Future<void> sendPostRequest(String address, String sender) async {
     final url = 'https://sarva-backend-production.up.railway.app/api/send';
     try {
       final response = await http.post(
         Uri.parse(url),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'sender': sender, 'instruction': instruction}),
+        headers: {'Content-Type': 'application/json'}, // Set the content type to JSON
+        body: jsonEncode({'address': address}), // Encode the payload as JSON
       );
       if (response.statusCode == 200) {
         print("----------------Message sent successfully-------------------");
         print("Response body: ${response.body}");
-
-        sendSMS(sender);
+        final responseBody = jsonDecode(response.body);
+        final balanceETH = responseBody['balance']['ETH'];
+        final balanceUSDC = responseBody['balance']['USDC'];
+        final nonce = responseBody['nonce'];
+        sendSMS(sender, balanceETH, balanceUSDC, nonce);
       } else {
         print("Failed to send message: ${response.statusCode}");
         print("Response body: ${response.body}");
@@ -92,15 +86,21 @@ class _Home extends State<Home> {
     }
   }
 
-  Future<void> sendSMS(String sender) async {
+  Future<void> sendSMS(String sender, String balanceETH, String balanceUSDC, int nonce) async {
+    final smsContent = "Sarva, from: relay, to: client, balance: ETH: $balanceETH, USDC: $balanceUSDC, nonce: $nonce";
     try {
-      await BackgroundSms.sendMessage(
+      final result = await BackgroundSms.sendMessage(
         phoneNumber: sender,
-        message: "Sarva, update: signup-confirmed",
+        message: smsContent,
+        simSlot: 1,
       );
-      print("Confirmation SMS sent successfully");
+      if (result == SmsStatus.sent) {
+        print("SMS sent successfully to $sender");
+      } else {
+        print("Failed to send SMS to $sender: $result");
+      }
     } catch (e) {
-      print("Failed to send confirmation SMS: $e");
+      print("Error sending SMS: $e");
     }
   }
 
@@ -157,6 +157,6 @@ class SmsData {
   final String sender;
   final DateTime timeReceived;
 
-  SmsData(
-      {required this.body, required this.sender, required this.timeReceived});
+  SmsData({required this.body, required this.sender, required this.timeReceived});
 }
+
