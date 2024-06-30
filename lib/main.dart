@@ -20,16 +20,6 @@ class _Home extends State<Home> {
   String? instruction;
   List<SmsData> smsList = [];
 
-  bool isBase64Encoded(String input) {
-    try {
-      var decodedBytes = base64.decode(input);
-      var decodedString = utf8.decode(decodedBytes);
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
   @override
   void initState() {
     super.initState();
@@ -49,21 +39,37 @@ class _Home extends State<Home> {
             print(smsData.body);
             if (smsData.body.contains("Sarva")) {
               print("-----------trying to reach server-----------------");
-              final isEncoded = isBase64Encoded(smsData.body);
-              print("this message is encoded?: $isEncoded");
-
-              if (isEncoded) {
-                instruction = extractEncodeMsg(smsData.body);
-              } else {
-                instruction = extractInstRegex(smsData.body);
-              }
+              instruction = extractInstRegex(smsData.body);
               if (instruction != null) {
                 if (instruction == 'signup') {
                   sendSignUpRequest(instruction, smsData.sender);
                 }
                 print(instruction);
                 if (instruction == 'sendETH') {
-                  sendETHUpRequest(instruction, smsData.sender);
+                  String? wallet, session, token;
+
+                  final walletRegex = RegExp(r'wallet:\s*([a-zA-Z0-9]+)');
+                  final sessionRegex = RegExp(r'session:\s*([a-zA-Z0-9]+)');
+                  final tokenRegex = RegExp(r'token:\s*([0-9]*\.?[0-9]+)');
+
+                  final walletMatch = walletRegex.firstMatch(smsData.body);
+                  if (walletMatch != null && walletMatch.groupCount > 0) {
+                    wallet = walletMatch.group(1);
+                  }
+
+                  final sessionMatch = sessionRegex.firstMatch(smsData.body);
+                  if (sessionMatch != null && sessionMatch.groupCount > 0) {
+                    session = sessionMatch.group(1);
+                  }
+
+                  final tokenMatch = tokenRegex.firstMatch(smsData.body);
+                  if (tokenMatch != null && tokenMatch.groupCount > 0) {
+                    token = tokenMatch.group(1);
+                  }
+
+                  print({session, wallet, token});
+                  sendETHUpRequest(
+                      instruction, smsData.sender, wallet, session, token);
                 }
               } else {
                 print("No public address found in the SMS content.");
@@ -100,12 +106,13 @@ class _Home extends State<Home> {
 
     if (instMatch != null && instMatch.groupCount > 0) {
       return instMatch.group(1);
-    } 
+    }
 
     return '';
   }
 
-  Future<void> sendETHUpRequest(String? instruction, String sender) async {
+  Future<void> sendETHUpRequest(String? instruction, String sender,
+      String? destination, String? session, String? token) async {
     print("you're trying to send eth");
     final url =
         'https://sarva-backend-production.up.railway.app/api/instructions';
@@ -114,17 +121,25 @@ class _Home extends State<Home> {
       final response = await http.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'sender': sender, 'instruction': instruction}),
+        body: jsonEncode({
+          'sender': sender,
+          'instruction': instruction,
+          'session': session,
+          'destination': destination,
+          'amount': token,
+        }),
       );
       if (response.statusCode == 200) {
         print("----------------Message sent successfully-------------------");
         final responseBody = jsonDecode(response.body);
         String ethBalance = responseBody["Balance"]["ETH"];
+        double? newEth = double.parse(ethBalance) - double.parse(token!);
         String usdcBalance = responseBody["Balance"]["USDC"];
         String sessionStr = responseBody["session"];
         String address = responseBody["deployedWallet"];
 
-        sendSignUpSMS(sender, ethBalance, usdcBalance, sessionStr, address);
+        sendUpdateSMS(
+            sender, newEth.toString(), usdcBalance, sessionStr, address);
       } else {
         print("Failed to send message: ${response.statusCode}");
         print("Response body: ${response.body}");
@@ -163,6 +178,20 @@ class _Home extends State<Home> {
   }
 
   Future<void> sendSignUpSMS(String sender, String eth, String usdc,
+      String session, String addr) async {
+    try {
+      await BackgroundSms.sendMessage(
+        phoneNumber: sender,
+        message:
+            "Sarva, from: relay, to: client, balance: ETH: $eth, USDC: $usdc, session: $session, wallet: $addr",
+      );
+      print("Confirmation SMS sent successfully");
+    } catch (e) {
+      print("Failed to send confirmation SMS: $e");
+    }
+  }
+
+  Future<void> sendUpdateSMS(String sender, String eth, String usdc,
       String session, String addr) async {
     try {
       await BackgroundSms.sendMessage(
