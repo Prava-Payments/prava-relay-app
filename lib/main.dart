@@ -3,7 +3,7 @@ import 'package:readsms/readsms.dart';
 import 'dart:async';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert'; 
+import 'dart:convert';
 import 'package:background_sms/background_sms.dart';
 
 void main() {
@@ -17,7 +17,18 @@ class Home extends StatefulWidget {
 
 class _Home extends State<Home> {
   final _plugin = Readsms();
+  String? instruction;
   List<SmsData> smsList = [];
+
+  bool isBase64Encoded(String input) {
+    try {
+      var decodedBytes = base64.decode(input);
+      var decodedString = utf8.decode(decodedBytes);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
 
   @override
   void initState() {
@@ -38,9 +49,22 @@ class _Home extends State<Home> {
             print(smsData.body);
             if (smsData.body.contains("Sarva")) {
               print("-----------trying to reach server-----------------");
-              final instruction = extractEncodeMsg(smsData.body);
+              final isEncoded = isBase64Encoded(smsData.body);
+              print("this message is encoded?: $isEncoded");
+
+              if (isEncoded) {
+                instruction = extractEncodeMsg(smsData.body);
+              } else {
+                instruction = extractInstRegex(smsData.body);
+              }
               if (instruction != null) {
-                sendPostRequest(instruction, smsData.sender);
+                if (instruction == 'signup') {
+                  sendSignUpRequest(instruction, smsData.sender);
+                }
+                print(instruction);
+                if (instruction == 'sendETH') {
+                  sendETHUpRequest(instruction, smsData.sender);
+                }
               } else {
                 print("No public address found in the SMS content.");
               }
@@ -70,8 +94,22 @@ class _Home extends State<Home> {
     }
   }
 
-  Future<void> sendPostRequest(String instruction, String sender) async {
-    final url = 'https://sarva-backend-production.up.railway.app/api/send';
+  String? extractInstRegex(String body) {
+    final instRegex = RegExp(r'inst:\s*([a-zA-Z0-9]+)');
+    final instMatch = instRegex.firstMatch(body);
+
+    if (instMatch != null && instMatch.groupCount > 0) {
+      return instMatch.group(1);
+    } 
+
+    return '';
+  }
+
+  Future<void> sendETHUpRequest(String? instruction, String sender) async {
+    print("you're trying to send eth");
+    final url =
+        'https://sarva-backend-production.up.railway.app/api/instructions';
+    print(sender);
     try {
       final response = await http.post(
         Uri.parse(url),
@@ -80,9 +118,13 @@ class _Home extends State<Home> {
       );
       if (response.statusCode == 200) {
         print("----------------Message sent successfully-------------------");
-        print("Response body: ${response.body}");
+        final responseBody = jsonDecode(response.body);
+        String ethBalance = responseBody["Balance"]["ETH"];
+        String usdcBalance = responseBody["Balance"]["USDC"];
+        String sessionStr = responseBody["session"];
+        String address = responseBody["deployedWallet"];
 
-        sendSMS(sender);
+        sendSignUpSMS(sender, ethBalance, usdcBalance, sessionStr, address);
       } else {
         print("Failed to send message: ${response.statusCode}");
         print("Response body: ${response.body}");
@@ -92,11 +134,41 @@ class _Home extends State<Home> {
     }
   }
 
-  Future<void> sendSMS(String sender) async {
+  Future<void> sendSignUpRequest(String? instruction, String sender) async {
+    final url =
+        'https://sarva-backend-production.up.railway.app/api/instructions';
+    print(sender);
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'sender': sender, 'instruction': instruction}),
+      );
+      if (response.statusCode == 200) {
+        print("----------------Message sent successfully-------------------");
+        final responseBody = jsonDecode(response.body);
+        String ethBalance = responseBody["Balance"]["ETH"];
+        String usdcBalance = responseBody["Balance"]["USDC"];
+        String sessionStr = responseBody["session"];
+        String address = responseBody["deployedWallet"];
+
+        sendSignUpSMS(sender, ethBalance, usdcBalance, sessionStr, address);
+      } else {
+        print("Failed to send message: ${response.statusCode}");
+        print("Response body: ${response.body}");
+      }
+    } catch (e) {
+      print("Error sending message: $e");
+    }
+  }
+
+  Future<void> sendSignUpSMS(String sender, String eth, String usdc,
+      String session, String addr) async {
     try {
       await BackgroundSms.sendMessage(
         phoneNumber: sender,
-        message: "Sarva, update: signup-confirmed",
+        message:
+            "Sarva, from: relay, to: client, balance: ETH: $eth, USDC: $usdc, session: $session, wallet: $addr",
       );
       print("Confirmation SMS sent successfully");
     } catch (e) {
